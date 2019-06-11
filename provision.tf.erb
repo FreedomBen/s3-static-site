@@ -1,14 +1,24 @@
 <%
-  ENABLE_CLOUDFRONT_TLS = true
-  REGION = 'us-east-1'
+  ENABLE_CLOUDFRONT_TLS ||= true
+  REGION                ||= 'us-east-1'
+  IS_SUBDOMAIN          ||= true
+  ENVIRONMENT           ||= 'prod'
+  ENABLE_LOGGING        ||= true
+  ENABLE_API            ||= true
+  #USE_NAKED_DOMAIN      ||= true # Not supported yet
+
+  SITE_SUB_DOM ||= 'subdomain'
+  SITE_DOMAIN  ||= 'example'
+  SITE_TLD     ||= 'com'
 %>
 
 # Set your site's info here
 locals {
-  name   = "example"
-  tld    = "com"
-  domain = "${local.name}.${local.tld}"
-  region = "<%= REGION %>"
+  name        = "<%= IS_SUBDOMAIN ? "#{SITE_SUB_DOM}.#{SITE_DOMAIN}" : SITE_DOMAIN %>"
+  tld         = "<%= SITE_TLD %>"
+  domain      = "${local.name}.${local.tld}"
+  region      = "<%= REGION %>"
+  environment = "<%= ENVIRONMENT %>"
 }
 
 data "aws_route53_zone" "domain" {
@@ -16,6 +26,7 @@ data "aws_route53_zone" "domain" {
   private_zone = false
 }
 
+<% if !IS_SUBDOMAIN %>
 resource "aws_route53_record" "www" {
   zone_id = "${data.aws_route53_zone.domain.zone_id}"
   name    = "www.${local.domain}"
@@ -27,6 +38,7 @@ resource "aws_route53_record" "www" {
     evaluate_target_health = false
   }
 }
+<% end %>
 
 resource "aws_route53_record" "main" {
   zone_id = "${data.aws_route53_zone.domain.zone_id}"
@@ -45,24 +57,29 @@ resource "aws_route53_record" "main" {
   }
 }
 
-# Use the data one if the log one is failing
-data "aws_s3_bucket" "logs" {
-  bucket = "${local.name}-logs"
-}
+<% if ENABLE_LOGGING %>
+  # Use the data one if the log one is failing
 
-#resource "aws_s3_bucket" "logs" {
-#  bucket = "${local.name}-logs"
-#  acl    = "log-delivery-write"
-#}
-
-resource "aws_s3_bucket" "www" {
-  bucket = "www.${local.domain}"
-  acl    = "private"
-
-  website {
-  redirect_all_requests_to = "<%= ENABLE_CLOUDFRONT_TLS ? 'https' : 'http' %>://${local.domain}"
+  data "aws_s3_bucket" "logs" {
+    bucket = "${local.name}-logs"
   }
-}
+
+  #resource "aws_s3_bucket" "logs" {
+  #  bucket = "${local.name}-logs"
+  #  acl    = "log-delivery-write"
+  #}
+<% end %>
+
+<% if !IS_SUBDOMAIN %>
+  resource "aws_s3_bucket" "www" {
+    bucket = "www.${local.domain}"
+    acl    = "private"
+
+    website {
+    redirect_all_requests_to = "<%= ENABLE_CLOUDFRONT_TLS ? 'https' : 'http' %>://${local.domain}"
+    }
+  }
+<% end %>
 
 resource "aws_s3_bucket" "main" {
   bucket = "${local.domain}"
@@ -77,16 +94,19 @@ resource "aws_s3_bucket" "main" {
       "Action":["s3:GetObject"],
       "Resource":["arn:aws:s3:::${local.domain}/*"]
     }]
-}  
+}
 EOF
 
+<% if ENABLE_LOGGING %>
   logging {
     #target_bucket = "${aws_s3_bucket.logs.id}"
     target_bucket = "${data.aws_s3_bucket.logs.id}"
     target_prefix = "log/"
   }
+<% end %>
 
-  # Don't need these yet, but will when adding an API
+
+<% if ENABLE_API %>
   cors_rule {
     allowed_headers = ["*"]
     allowed_methods = ["PUT", "POST"]
@@ -94,6 +114,7 @@ EOF
     expose_headers  = ["ETag"]
     max_age_seconds = 3000
   }
+<% end %>
 
   tags {
     Name        = "${local.name}"
@@ -104,16 +125,17 @@ EOF
     index_document = "index.html"
     error_document = "404.html"
 
-    routing_rules = <<EOF
-[{
-    "Condition": {
-        "KeyPrefixEquals": "docs/"
-    },
-    "Redirect": {
-        "ReplaceKeyPrefixWith": "documents/"
-    }
-}]
-EOF
+    # Example routing rules:
+#    routing_rules = <<EOF
+#[{
+#    "Condition": {
+#        "KeyPrefixEquals": "docs/"
+#    },
+#    "Redirect": {
+#        "ReplaceKeyPrefixWith": "documents/"
+#    }
+#}]
+#EOF
   }
 }
 
@@ -125,116 +147,123 @@ provider "aws" {
 data "aws_region" "current" {}
 data "aws_availability_zones" "available" {}
 
+
+<% if ENABLE_CLOUDFRONT_TLS %>
+
 # CloudFront
 
-<% if REGION == 'us-east-1' %>
-  resource "aws_acm_certificate" "cert" {
-    domain_name       = "${local.domain}"
-    validation_method = "DNS"
+  <% if REGION == 'us-east-1' %>
+    resource "aws_acm_certificate" "cert" {
+      domain_name       = "${local.domain}"
+      validation_method = "DNS"
+
+      tags = {
+        Environment = "production"
+      }
+
+      lifecycle {
+        create_before_destroy = true
+      }
+    }
+  <% end %>
+
+  locals {
+    s3_origin_id = "S3-${local.domain}"
+  }
+
+  resource "aws_cloudfront_distribution" "s3_distribution" {
+    origin {
+      domain_name = "${aws_s3_bucket.main.bucket_regional_domain_name}"
+      origin_id   = "${local.s3_origin_id}"
+
+      # See: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html
+      # and: https://www.terraform.io/docs/providers/aws/r/cloudfront_origin_access_identity.html
+      #s3_origin_config {
+      #  origin_access_identity = "origin-access-identity/cloudfront/ABCDEFG1234567"
+      #}
+    }
+
+    enabled             = true
+    is_ipv6_enabled     = true
+    #comment             = "Some comment"
+    default_root_object = "index.html"
+
+  <% if ENABLE_LOGGING %>
+    logging_config {
+      include_cookies = false
+      bucket          = "${aws_s3_bucket.logs.bucket_regional_domain_name}"
+      prefix          = "cloudfront"
+    }
+  <% end %>
+
+    aliases = ["${local.domain}"<%= ', "www.${local.domain}"' if !IS_SUBDOMAIN %>]
+
+    default_cache_behavior {
+      allowed_methods  = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+      cached_methods   = ["GET", "HEAD"]
+      target_origin_id = "${local.s3_origin_id}"
+
+      forwarded_values {
+        query_string = false
+
+        cookies {
+          forward = "none"
+        }
+      }
+
+      viewer_protocol_policy = "allow-all"
+      min_ttl                = 0
+      default_ttl            = 3600
+      max_ttl                = 86400
+    }
+
+    ordered_cache_behavior {
+      path_pattern     = "*"
+      allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+      cached_methods   = ["GET", "HEAD"]
+      target_origin_id = "${local.s3_origin_id}"
+
+      forwarded_values {
+        query_string = false
+
+        cookies {
+          forward = "none"
+        }
+      }
+
+      min_ttl                = 0
+      default_ttl            = 3600
+      max_ttl                = 86400
+      compress               = true
+      viewer_protocol_policy = "redirect-to-https"
+      smooth_streaming       = "false"
+    }
+
+    # PriceClass_All, PriceClass_200, PriceClass_100
+    price_class = "PriceClass_100"
+
+    restrictions {
+      geo_restriction {
+        restriction_type = "whitelist"
+        locations        = ["US", "CA", "MX"]
+      }
+    }
 
     tags = {
       Environment = "production"
     }
 
-    lifecycle {
-      create_before_destroy = true
-    }
-  }
-<% end %>
+    viewer_certificate {
+      cloudfront_default_certificate = false
+      minimum_protocol_version       = "TLSv1.2_2018"
+      ssl_support_method             = "sni-only"
 
-locals {
-  s3_origin_id = "S3-${local.domain}"
-}
-
-resource "aws_cloudfront_distribution" "s3_distribution" {
-  origin {
-    domain_name = "${aws_s3_bucket.main.bucket_regional_domain_name}"
-    origin_id   = "${local.s3_origin_id}"
-
-    # See: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html
-    # and: https://www.terraform.io/docs/providers/aws/r/cloudfront_origin_access_identity.html
-    #s3_origin_config {
-    #  origin_access_identity = "origin-access-identity/cloudfront/ABCDEFG1234567"
-    #}
-  }
-
-  enabled             = true
-  is_ipv6_enabled     = true
-  #comment             = "Some comment"
-  default_root_object = "index.html"
-
-  logging_config {
-    include_cookies = false
-    bucket          = "${aws_s3_bucket.logs.bucket_regional_domain_name}"
-    prefix          = "cloudfront"
-  }
-
-  aliases = ["${local.domain}", "www.${local.domain}"]
-
-  default_cache_behavior {
-    allowed_methods  = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
-    cached_methods   = ["GET", "HEAD"]
-    target_origin_id = "${local.s3_origin_id}"
-
-    forwarded_values {
-      query_string = false
-
-      cookies {
-        forward = "none"
-      }
-    }
-
-    viewer_protocol_policy = "allow-all"
-    min_ttl                = 0
-    default_ttl            = 3600
-    max_ttl                = 86400
-  }
-
-  ordered_cache_behavior {
-    path_pattern     = "*"
-    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
-    cached_methods   = ["GET", "HEAD"]
-    target_origin_id = "${local.s3_origin_id}"
-
-    forwarded_values {
-      query_string = false
-
-      cookies {
-        forward = "none"
-      }
-    }
-
-    min_ttl                = 0
-    default_ttl            = 3600
-    max_ttl                = 86400
-    compress               = true
-    viewer_protocol_policy = "redirect-to-https"
-    smooth_streaming       = "false"
-  }
-
-  # PriceClass_All, PriceClass_200, PriceClass_100
-  price_class = "PriceClass_100"
-
-  restrictions {
-    geo_restriction {
-      restriction_type = "whitelist"
-      locations        = ["US", "CA", "MX"]
+    <% if REGION == 'us-east-1' %>
+      acm_certificate_arn            = "${data.aws_acm_certificate.cert.arn}"
+    <% else %>
+      acm_certificate_arn            = "<Replace-with-ACM-cert-ARN>"
+    <% end %>
     }
   }
 
-  tags = {
-    Environment = "production"
-  }
-
-  viewer_certificate {
-    cloudfront_default_certificate = false
-    minimum_protocol_version       = "TLSv1.2_2018"
-    ssl_support_method             = "sni-only"
-
-  <% if REGION == 'us-east-1' %>
-    acm_certificate_arn            = "${data.aws_acm_certificate.cert.arn}"
-  <% else %>
-    acm_certificate_arn            = "<Replace-with-ACM-cert-ARN>"
-  <% end %>
-  }
-}
+<% end # if ENABLE_CLOUDFRONT_TLS %>
