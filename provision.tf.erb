@@ -109,7 +109,7 @@ EOF
 <% if ENABLE_API %>
   cors_rule {
     allowed_headers = ["*"]
-    allowed_methods = ["PUT", "POST"]
+    allowed_methods = ["HEAD", "GET", "PUT", "POST", "PATCH", "DELETE", "OPTIONS"]
     allowed_origins = ["https://api.${local.domain}"]
     expose_headers  = ["ETag"]
     max_age_seconds = 3000
