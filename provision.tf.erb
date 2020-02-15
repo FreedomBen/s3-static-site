@@ -1,32 +1,35 @@
 <%
-  ENABLE_CLOUDFRONT_TLS ||= true
-  REGION                ||= 'us-east-1'
-  IS_SUBDOMAIN          ||= true
-  ENVIRONMENT           ||= 'prod'
-  ENABLE_LOGGING        ||= true
-  ENABLE_API            ||= true
-  #USE_NAKED_DOMAIN      ||= true # Not supported yet
+  # Annoyingly these have to be lowercase
+  enable_cloudfront_tls ||= true
+  region                ||= 'us-east-1'
+  is_subdomain          ||= true
+  environment           ||= 'prod'
+  enable_logging        ||= true
+  enable_api            ||= false
+  restrict_geo          ||= false
+  price_class           ||= 100   # valid are 100, 200, All - https://aws.amazon.com/cloudfront/pricing/
+  #use_naked_domain      ||= true # Not supported yet
 
-  SITE_SUB_DOM ||= 'subdomain'
-  SITE_DOMAIN  ||= 'example'
-  SITE_TLD     ||= 'com'
+  site_sub_dom ||= 'subdomain'
+  site_domain  ||= 'example'
+  site_tld     ||= 'com'
 %>
 
 # Set your site's info here
 locals {
-  name        = "<%= IS_SUBDOMAIN ? "#{SITE_SUB_DOM}.#{SITE_DOMAIN}" : SITE_DOMAIN %>"
-  tld         = "<%= SITE_TLD %>"
+  name        = "<%= is_subdomain ? "#{site_sub_dom}.#{site_domain}" : site_domain %>"
+  tld         = "<%= site_tld %>"
   domain      = "${local.name}.${local.tld}"
-  region      = "<%= REGION %>"
-  environment = "<%= ENVIRONMENT %>"
+  region      = "<%= region %>"
+  environment = "<%= environment %>"
 }
 
 data "aws_route53_zone" "domain" {
-  name         = "<%= IS_SUBDOMAIN ? "#{SITE_DOMAIN}.#{SITE_TLD}." : '${local.domain}.' %>"
+  name         = "<%= is_subdomain ? "#{site_domain}.#{site_tld}." : '${local.domain}.' %>"
   private_zone = false
 }
 
-<% if !IS_SUBDOMAIN %>
+<% if !is_subdomain %>
 resource "aws_route53_record" "www" {
   zone_id = "${data.aws_route53_zone.domain.zone_id}"
   name    = "www.${local.domain}"
@@ -46,7 +49,7 @@ resource "aws_route53_record" "main" {
   type    = "A"
 
   alias {
-<% if ENABLE_CLOUDFRONT_TLS %>
+<% if enable_cloudfront_tls %>
     name                   = "${aws_cloudfront_distribution.s3_distribution.domain_name}"
     zone_id                = "${aws_cloudfront_distribution.s3_distribution.hosted_zone_id}"
 <% else %>
@@ -57,7 +60,7 @@ resource "aws_route53_record" "main" {
   }
 }
 
-<% if ENABLE_LOGGING %>
+<% if enable_logging %>
   # Use the data one if the log one is failing
 
   data "aws_s3_bucket" "logs" {
@@ -70,13 +73,13 @@ resource "aws_route53_record" "main" {
   #}
 <% end %>
 
-<% if !IS_SUBDOMAIN %>
+<% if !is_subdomain %>
   resource "aws_s3_bucket" "www" {
     bucket = "www.${local.domain}"
     acl    = "private"
 
     website {
-    redirect_all_requests_to = "<%= ENABLE_CLOUDFRONT_TLS ? 'https' : 'http' %>://${local.domain}"
+    redirect_all_requests_to = "<%= enable_cloudfront_tls ? 'https' : 'http' %>://${local.domain}"
     }
   }
 <% end %>
@@ -97,7 +100,7 @@ resource "aws_s3_bucket" "main" {
 }
 EOF
 
-<% if ENABLE_LOGGING %>
+<% if enable_logging %>
   logging {
     #target_bucket = "${aws_s3_bucket.logs.id}"
     target_bucket = "${data.aws_s3_bucket.logs.id}"
@@ -106,7 +109,7 @@ EOF
 <% end %>
 
 
-<% if ENABLE_API %>
+<% if enable_api %>
   cors_rule {
     allowed_headers = ["*"]
     allowed_methods = ["HEAD", "GET", "PUT", "POST", "DELETE"]
@@ -118,7 +121,7 @@ EOF
 
   tags {
     Name        = "${local.name}"
-    Environment = "prod"
+    Environment = "<%= environment %>"
   }
 
   website {
@@ -148,17 +151,17 @@ data "aws_region" "current" {}
 data "aws_availability_zones" "available" {}
 
 
-<% if ENABLE_CLOUDFRONT_TLS %>
+<% if enable_cloudfront_tls %>
 
 # CloudFront
 
-  <% if REGION == 'us-east-1' %>
+  <% if region == 'us-east-1' %>
     resource "aws_acm_certificate" "cert" {
       domain_name       = "${local.domain}"
       validation_method = "DNS"
 
       tags = {
-        Environment = "production"
+        Environment = "<%= environment %>"
       }
 
       lifecycle {
@@ -188,7 +191,7 @@ data "aws_availability_zones" "available" {}
     #comment             = "Some comment"
     default_root_object = "index.html"
 
-  <% if ENABLE_LOGGING %>
+  <% if enable_logging %>
     logging_config {
       include_cookies = false
       bucket          = "${aws_s3_bucket.logs.bucket_regional_domain_name}"
@@ -196,7 +199,7 @@ data "aws_availability_zones" "available" {}
     }
   <% end %>
 
-    aliases = ["${local.domain}"<%= ', "www.${local.domain}"' if !IS_SUBDOMAIN %>]
+    aliases = ["${local.domain}"<%= ', "www.${local.domain}"' if !is_subdomain %>]
 
     default_cache_behavior {
       allowed_methods  = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
@@ -240,17 +243,19 @@ data "aws_availability_zones" "available" {}
     }
 
     # PriceClass_All, PriceClass_200, PriceClass_100
-    price_class = "PriceClass_100"
+    price_class = "PriceClass_<%= price_class %>"
 
+  <% if restrict_geo %>
     restrictions {
       geo_restriction {
         restriction_type = "whitelist"
         locations        = ["US", "CA", "MX"]
       }
     }
+  <% end %>
 
     tags = {
-      Environment = "production"
+      Environment = "<%= environment %>"
     }
 
     viewer_certificate {
@@ -258,7 +263,7 @@ data "aws_availability_zones" "available" {}
       minimum_protocol_version       = "TLSv1.2_2018"
       ssl_support_method             = "sni-only"
 
-    <% if REGION == 'us-east-1' %>
+    <% if region == 'us-east-1' %>
       acm_certificate_arn            = "${data.aws_acm_certificate.cert.arn}"
     <% else %>
       acm_certificate_arn            = "<Replace-with-ACM-cert-ARN>"
@@ -266,4 +271,4 @@ data "aws_availability_zones" "available" {}
     }
   }
 
-<% end # if ENABLE_CLOUDFRONT_TLS %>
+<% end # if enable_cloudfront_tls %>
