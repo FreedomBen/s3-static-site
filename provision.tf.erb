@@ -1,5 +1,8 @@
 <%
   # Annoyingly these have to be lowercase
+  site_sub_dom           ||= 'subdomain'
+  site_domain            ||= 'example'
+  site_tld               ||= 'com'
   enable_cloudfront_tls  ||= true
   region                 ||= 'us-east-1'
   is_subdomain           ||= true
@@ -10,11 +13,29 @@
   restrict_geo           ||= false
   cloudfront_price_class ||= 100   # valid are 100, 200, All - https://aws.amazon.com/cloudfront/pricing/
   #use_naked_domain      ||= true # Not supported yet
-
-  site_sub_dom ||= 'subdomain'
-  site_domain  ||= 'example'
-  site_tld     ||= 'com'
 %>
+############################################################
+#
+#  This file was generated with https://github.com/freedomben/s3-static-site
+#  You can customize this file however much you like,
+#  but if you fix bugs please send a PR to fix the template!
+#
+#  This file was generated with these settings in the template:
+#
+#  - site_sub_dom           = '<%= site_sub_dom %>'
+#  - site_domain            = '<%= site_domain %>'
+#  - site_tld               = '<%= site_tld %>'
+#  - enable_cloudfront_tls  = <%= enable_cloudfront_tls %>
+#  - region                 = '<%= region %>'
+#  - is_subdomain           = <%= is_subdomain %>
+#  - environment            = '<%= environment %>'
+#  - enable_logging         = <%= enable_logging %>
+#  - preexisting_log_bucket = <%= preexisting_log_bucket %>
+#  - enable_api             = <%= enable_api %>
+#  - restrict_geo           = <%= restrict_geo %>
+#  - cloudfront_price_class = <%= cloudfront_price_class %>
+#
+############################################################
 
 # Set your site's info here
 locals {
