@@ -6,6 +6,7 @@ DOMAIN=example
 TLD=com
 
 erb \
+  enable_cloudfront_tls=false \
   region=us-west-2 \
   environment=staging \
   site_sub_dom=staging \

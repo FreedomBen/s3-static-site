@@ -1,13 +1,14 @@
 <%
   # Annoyingly these have to be lowercase
-  enable_cloudfront_tls ||= true
-  region                ||= 'us-east-1'
-  is_subdomain          ||= true
-  environment           ||= 'prod'
-  enable_logging        ||= true
-  enable_api            ||= false
-  restrict_geo          ||= false
-  price_class           ||= 100   # valid are 100, 200, All - https://aws.amazon.com/cloudfront/pricing/
+  enable_cloudfront_tls  ||= true
+  region                 ||= 'us-east-1'
+  is_subdomain           ||= true
+  environment            ||= 'prod'
+  enable_logging         ||= true
+  preexisting_log_bucket ||= false
+  enable_api             ||= false
+  restrict_geo           ||= false
+  cloudfront_price_class ||= 100   # valid are 100, 200, All - https://aws.amazon.com/cloudfront/pricing/
   #use_naked_domain      ||= true # Not supported yet
 
   site_sub_dom ||= 'subdomain'
@@ -63,14 +64,25 @@ resource "aws_route53_record" "main" {
 <% if enable_logging %>
   # Use the data one if the log one is failing
 
-  data "aws_s3_bucket" "logs" {
-    bucket = "${local.name}-logs"
-  }
+  <% if preexisting_log_bucket %>
+    data "aws_s3_bucket" "logs" {
+      bucket = "${local.name}-logs"
+    }
 
-  #resource "aws_s3_bucket" "logs" {
-  #  bucket = "${local.name}-logs"
-  #  acl    = "log-delivery-write"
-  #}
+    #resource "aws_s3_bucket" "logs" {
+    #  bucket = "${local.name}-logs"
+    #  acl    = "log-delivery-write"
+    #}
+  <% else %>
+    #data "aws_s3_bucket" "logs" {
+    #  bucket = "${local.name}-logs"
+    #}
+
+    resource "aws_s3_bucket" "logs" {
+      bucket = "${local.name}-logs"
+      acl    = "log-delivery-write"
+    }
+  <% end %>
 <% end %>
 
 <% if !is_subdomain %>
@@ -102,8 +114,13 @@ EOF
 
 <% if enable_logging %>
   logging {
-    #target_bucket = "${aws_s3_bucket.logs.id}"
-    target_bucket = "${data.aws_s3_bucket.logs.id}"
+    <% if preexisting_log_bucket %>
+      target_bucket = "${data.aws_s3_bucket.logs.id}"
+      #target_bucket = "${aws_s3_bucket.logs.id}"
+    <% else %>
+      #target_bucket = "${data.aws_s3_bucket.logs.id}"
+      target_bucket = "${aws_s3_bucket.logs.id}"
+    <% end %>
     target_prefix = "log/"
   }
 <% end %>
@@ -194,7 +211,13 @@ data "aws_availability_zones" "available" {}
   <% if enable_logging %>
     logging_config {
       include_cookies = false
-      bucket          = "${aws_s3_bucket.logs.bucket_regional_domain_name}"
+      <% if preexisting_log_bucket %>
+        bucket        = "${data.aws_s3_bucket.logs.id}"
+        #bucket        = "${aws_s3_bucket.logs.bucket_regional_domain_name}"
+      <% else %>
+        #bucket        = "${data.aws_s3_bucket.logs.id}"
+        bucket        = "${aws_s3_bucket.logs.bucket_regional_domain_name}"
+      <% end %>
       prefix          = "cloudfront"
     }
   <% end %>
@@ -243,7 +266,7 @@ data "aws_availability_zones" "available" {}
     }
 
     # PriceClass_All, PriceClass_200, PriceClass_100
-    price_class = "PriceClass_<%= price_class %>"
+    price_class = "PriceClass_<%= cloudfront_price_class %>"
 
   <% if restrict_geo %>
     restrictions {
