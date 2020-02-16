@@ -157,10 +157,10 @@ EOF
   }
 <% end %>
 
-  tags {
-    Name        = "${local.name}"
-    Environment = "<%= environment %>"
-  }
+  #tags {
+  #  Name        = ${local.name}
+  #  Environment = <%= environment %>
+  #}
 
   website {
     index_document = "index.html"
@@ -294,6 +294,13 @@ data "aws_availability_zones" "available" {}
       geo_restriction {
         restriction_type = "whitelist"
         locations        = ["US", "CA", "MX"]
+      }
+    }
+  <% else %>
+    restrictions {
+      geo_restriction {
+        restriction_type = "blacklist"
+        locations        = []
       }
     }
   <% end %>
