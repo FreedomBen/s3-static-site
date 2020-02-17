@@ -1,20 +1,23 @@
 <%
   # Annoyingly these have to be lowercase
-  site_sub_dom           ||= 'subdomain'
-  site_domain            ||= 'example'
-  site_tld               ||= 'com'
-  enable_cloudfront_tls  ||= true
-  preexisting_acm_cert   ||= false
-  region                 ||= 'us-east-1'
-  is_subdomain           ||= true
-  environment            ||= 'prod'
-  enable_logging         ||= true
-  preexisting_log_bucket ||= false
-  enable_api             ||= false
-  restrict_geo           ||= false
-  cloudfront_price_class ||= 100   # valid are 100, 200, All - https://aws.amazon.com/cloudfront/pricing/
+  site_sub_dom                ||= 'www'
+  site_domain                 ||= 'example'
+  site_tld                    ||= 'com'
+  enable_cloudfront_tls       ||= true
+  preexisting_acm_cert        ||= false
+  preexisting_acm_cert_arn    ||= ''
+  region                      ||= 'us-east-1'
+  is_subdomain                ||= true
+  environment                 ||= 'prod'
+  enable_logging              ||= true
+  preexisting_log_bucket      ||= false
+  preexisting_log_bucket_name ||= ''
+  enable_api                  ||= false
+  restrict_geo                ||= false
+  cloudfront_price_class      ||= 100   # valid are 100, 200, All - https://aws.amazon.com/cloudfront/pricing/
   #use_naked_domain      ||= true # Not supported yet
 %>
+
 ############################################################
 #
 #  This file was generated with https://github.com/freedomben/s3-static-site
@@ -23,22 +26,24 @@
 #
 #  This file was generated with these settings in the template:
 #
-#  - site_sub_dom           = '<%= site_sub_dom %>'
-#  - site_domain            = '<%= site_domain %>'
-#  - site_tld               = '<%= site_tld %>'
-#  - enable_cloudfront_tls  = <%= enable_cloudfront_tls %>
-#  - region                 = '<%= region %>'
-#  - is_subdomain           = <%= is_subdomain %>
-#  - environment            = '<%= environment %>'
-#  - enable_logging         = <%= enable_logging %>
-#  - preexisting_log_bucket = <%= preexisting_log_bucket %>
-#  - enable_api             = <%= enable_api %>
-#  - restrict_geo           = <%= restrict_geo %>
-#  - cloudfront_price_class = <%= cloudfront_price_class %>
+#  - site_sub_dom                = '<%= site_sub_dom %>'
+#  - site_domain                 = '<%= site_domain %>'
+#  - site_tld                    = '<%= site_tld %>'
+#  - enable_cloudfront_tls       = <%= enable_cloudfront_tls %>
+#  - preexisting_acm_cert        = <%= preexisting_acm_cert %>
+#  - preexisting_acm_cert_arn    = <%= preexisting_acm_cert %>
+#  - region                      = '<%= region %>'
+#  - is_subdomain                = <%= is_subdomain %>
+#  - environment                 = '<%= environment %>'
+#  - enable_logging              = <%= enable_logging %>
+#  - preexisting_log_bucket      = <%= preexisting_log_bucket %>
+#  - preexisting_log_bucket_name = '<%= preexisting_log_bucket %>'
+#  - enable_api                  = <%= enable_api %>
+#  - restrict_geo                = <%= restrict_geo %>
+#  - cloudfront_price_class      = <%= cloudfront_price_class %>
 #
 ############################################################
 
-# Set your site's info here
 locals {
   name        = "<%= is_subdomain ? "#{site_sub_dom}.#{site_domain}" : site_domain %>"
   tld         = "<%= site_tld %>"
@@ -84,22 +89,11 @@ resource "aws_route53_record" "main" {
 }
 
 <% if enable_logging %>
-  # Use the data one if the log one is failing
-
   <% if preexisting_log_bucket %>
     data "aws_s3_bucket" "logs" {
-      bucket = "${local.name}-logs"
+      bucket = "<%= preexisting_log_bucket_name %>"
     }
-
-    #resource "aws_s3_bucket" "logs" {
-    #  bucket = "${local.name}-logs"
-    #  acl    = "log-delivery-write"
-    #}
   <% else %>
-    #data "aws_s3_bucket" "logs" {
-    #  bucket = "${local.name}-logs"
-    #}
-
     resource "aws_s3_bucket" "logs" {
       bucket = "${local.name}-logs"
       acl    = "log-delivery-write"
@@ -138,9 +132,7 @@ EOF
   logging {
     <% if preexisting_log_bucket %>
       target_bucket = "${data.aws_s3_bucket.logs.id}"
-      #target_bucket = "${aws_s3_bucket.logs.id}"
     <% else %>
-      #target_bucket = "${data.aws_s3_bucket.logs.id}"
       target_bucket = "${aws_s3_bucket.logs.id}"
     <% end %>
     target_prefix = "log/"
@@ -157,11 +149,6 @@ EOF
     max_age_seconds = 3000
   }
 <% end %>
-
-  #tags {
-  #  Name        = ${local.name}
-  #  Environment = <%= environment %>
-  #}
 
   website {
     index_document = "index.html"
@@ -225,7 +212,6 @@ data "aws_availability_zones" "available" {}
 
     enabled             = true
     is_ipv6_enabled     = true
-    #comment             = "Some comment"
     default_root_object = "index.html"
 
   <% if enable_logging %>
@@ -233,9 +219,7 @@ data "aws_availability_zones" "available" {}
       include_cookies = false
       <% if preexisting_log_bucket %>
         bucket        = "${data.aws_s3_bucket.logs.id}"
-        #bucket        = "${aws_s3_bucket.logs.bucket_regional_domain_name}"
       <% else %>
-        #bucket        = "${data.aws_s3_bucket.logs.id}"
         bucket        = "${aws_s3_bucket.logs.bucket_regional_domain_name}"
       <% end %>
       prefix          = "cloudfront"
@@ -315,8 +299,10 @@ data "aws_availability_zones" "available" {}
 
     <% if preexisting_acm_cert %>
       acm_certificate_arn            = "${data.aws_acm_certificate.cert.arn}"
-    <% else %>
+    <% elsif preexisting_acm_cert_arn.empty? %>
       acm_certificate_arn            = "<Replace-with-ACM-cert-ARN>"
+    <% else %>
+      acm_certificate_arn            = "<%= preexisting_acm_cert_arn %>"
     <% end %>
     }
   }
