@@ -4,6 +4,7 @@
   site_domain            ||= 'example'
   site_tld               ||= 'com'
   enable_cloudfront_tls  ||= true
+  preexisting_acm_cert   ||= false
   region                 ||= 'us-east-1'
   is_subdomain           ||= true
   environment            ||= 'prod'
@@ -188,12 +189,10 @@ provider "aws" {
 data "aws_region" "current" {}
 data "aws_availability_zones" "available" {}
 
-
+# CloudFront
 <% if enable_cloudfront_tls %>
 
-# CloudFront
-
-  <% if region == 'us-east-1' %>
+  <% unless preexisting_acm_cert %>
     resource "aws_acm_certificate" "cert" {
       domain_name       = "${local.domain}"
       validation_method = "DNS"
@@ -314,7 +313,7 @@ data "aws_availability_zones" "available" {}
       minimum_protocol_version       = "TLSv1.2_2018"
       ssl_support_method             = "sni-only"
 
-    <% if region == 'us-east-1' %>
+    <% if preexisting_acm_cert %>
       acm_certificate_arn            = "${data.aws_acm_certificate.cert.arn}"
     <% else %>
       acm_certificate_arn            = "<Replace-with-ACM-cert-ARN>"
